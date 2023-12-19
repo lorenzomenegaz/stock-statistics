@@ -1,62 +1,83 @@
 import pandas as pd
-import yfinance as yf
 import numpy as np
+import yfinance as yf
 from datetime import datetime
 
-ticker = str(input('Ticker: ')).upper() + '.SA'
+acao = input("Escolha uma ação para ser analisada: ").upper()
 
-df = pd.DataFrame(yf.download([ticker, '^BVSP'], '2015-01-01', datetime.now())).dropna()
+acao = acao + ".SA"
 
-df['ano'] = df.index.year
+ativos = [acao, "^BVSP"]
 
-df_close = df['Close'].pct_change().dropna()
-df_close['ano'] = df_close.index.year
+dados_completos = yf.download(ativos, "2015-01-01", datetime.now())
 
-retorno_anual_contra_ibov = df_close.groupby('ano').sum()
+cotacoes_ajustadas = dados_completos['Adj Close']
 
-print(f'Retorno anual contra IBOVESPA: \n{retorno_anual_contra_ibov}\n')
+retornos = cotacoes_ajustadas.pct_change().dropna()
+
+retornos['ano'] = retornos.index.year
+
+#retorno acum por ano
+
+retornos[f'{acao}'] = 1 + retornos[f'{acao}'] 
+retornos['^BVSP'] = 1 + retornos['^BVSP']
+
+retornos[f'retorno_YTD_{acao}'] = retornos.groupby('ano')[f'{acao}'].cumprod() - 1 
+retornos[f'retorno_YTD_ibov'] = retornos.groupby('ano')['^BVSP'].cumprod() - 1 
+
+retorno_por_ano = retornos.groupby('ano').tail(1)[[f'retorno_YTD_{acao}', 'retorno_YTD_ibov']]
+
+print(f"Retorno ano a ano \n{retorno_por_ano*100}\n")
+
+#Estat descritivas da empresa
+
+retornos = cotacoes_ajustadas[f'{acao}'].pct_change().dropna()
+
+retornos = retornos.to_frame()
+
+retornos['ano'] = retornos.index.year
 
 def estatisticas(agrupamento):
     
     return {'min': agrupamento.min() * 100, 'max': agrupamento.max() * 100, 
             'media': agrupamento.mean() * 100, 'vol': agrupamento.std() * np.sqrt(252)}
 
-estatisticas_por_ano = df.groupby('ano')['Close'].apply(estatisticas)
+descritivas = retornos.groupby('ano')[f'{acao}'].apply(estatisticas)
 
-print(f'Estatísticas descritivas: \n{estatisticas_por_ano.describe()}\n')
+print(f"Estatísticas descritivas: \n{descritivas}\n")
 
-acao = yf.download(ticker, '2015-01-01', datetime.now())
+#maxDD
 
-acao = pd.DataFrame(acao)
+cotacoes_empresa = cotacoes_ajustadas[f'{acao}']
 
-acao['ano'], acao['mes'] = acao.index.year, acao.index.month
+cotacoes_empresa = cotacoes_empresa.to_frame()
 
-acao['volume_financeiro'] = acao['Volume'] * acao['Close']
+cotacoes_empresa['ano'] = cotacoes_empresa.index.year
 
-volume_medio_anual = acao.groupby(['ano'])['volume_financeiro'].mean()
+cotacoes_empresa['maxima_do_ano'] = cotacoes_empresa.groupby('ano')[f'{acao}'].cummax()
+cotacoes_empresa['quedas'] = cotacoes_empresa[f'{acao}']/cotacoes_empresa['maxima_do_ano'] - 1
 
-volume_medio_anual = volume_medio_anual.astype(int)
+print(f"Max DD: \n{cotacoes_empresa.groupby('ano')['quedas'].min()}\n")
 
-print(f'Volume financeiro médio anual negociado pela empresa: \n{volume_medio_anual}\n')
-
-maxdd = pd.DataFrame(acao)
-
-maxdd['ano'] = maxdd.index.year
-
-maxdd['maxima_do_ano'] = maxdd.groupby('ano')['Adj Close'].cummax()
-
-maxdd['quedas'] = maxdd['Adj Close']/maxdd['maxima_do_ano'] - 1
-
-retorno_maxdd = maxdd.groupby('ano')['quedas'].min()
-
-print(f'Máximo drawndown por ano: \n{retorno_maxdd}\n')
-
-cotacoes_ajustadas = df['Adj Close']
+#grafico de cor contra o ibov
 
 retornos = cotacoes_ajustadas.pct_change().dropna()
 
-retornos['ano'] = retornos.index.year
+retornos[f'{acao}'].rolling(252).corr(retornos['^BVSP']).dropna().plot()
 
-retornos[f'{ticker}'].rolling(252).corr(retornos['^BVSP']).dropna().plot()
+#volume medio anual
 
-print(f'Gráfico de correlação x IBOVESPA em 252 dias: \n{retornos}\n')
+volume_acoes = dados_completos['Volume'][f'{acao}']
+cotacao =  dados_completos['Close'][f'{acao}']
+
+volume_financeiro = volume_acoes * cotacao
+
+volume_financeiro = volume_financeiro.to_frame()
+
+volume_financeiro['ano'] = volume_financeiro.index.year
+
+volume_medio = volume_financeiro.groupby('ano').mean()
+
+volume_medio = volume_medio.astype(int)
+
+print(f"Volume negociado: \n{volume_medio}\n")
